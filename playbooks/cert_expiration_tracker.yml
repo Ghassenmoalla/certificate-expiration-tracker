@@ -1,0 +1,67 @@
+---
+- name: Certificate Expiration Tracker
+  hosts: "{{ variable_host | default('iis') }}"
+  tags: win_iis_certificate_check
+  tasks:
+    # Collects certificates from 'Personal' store.
+    - name: Collect 'Personal' store certificates information.
+      community.windows.win_certificate_info:
+        store_name: My
+      register: my_certs
+
+    # Filters out expired certificates and stores them in a list.
+    - name: Identify Expired Certificates
+      ansible.builtin.set_fact:
+        certificates_expired: >-
+          {{ 
+            certificates_expired | default([]) + 
+            [{
+              'issued_to': item.issued_to,
+              'status': 'expired',
+              'expire_date': item.valid_to_iso8601
+            }]
+          }}
+      loop: "{{ my_certs.certificates }}"
+      # The condition checks if the certificate's expiration date is in the past.
+      when: 
+        - my_certs is defined
+        - my_certs.certificates is defined
+        - (item.valid_to_iso8601 | to_datetime(format='%Y-%m-%dT%H:%M:%SZ')).timestamp() <= (now().timestamp())
+      loop_control:
+        label: "{{ item.issued_to }} - {{ item.valid_to_iso8601 }} - {{ item.thumbprint }}"      
+
+    - name: Identify Certificates Expiring Shortly (Within Two Weeks)
+      ansible.builtin.set_fact:
+        certificates_toexpire: >-
+          {{
+            certificates_toexpire | default([]) +
+            [{
+              'issued_to': item.issued_to,
+              'days_left': ((item.valid_to_iso8601 | to_datetime(format='%Y-%m-%dT%H:%M:%SZ')).timestamp() - now().timestamp()) // 86400 | int
+            }]
+          }}
+      loop: "{{ my_certs.certificates }}"
+      # The condition checks if the certificate's expiration date is within the next two weeks but not already expired.
+      when:
+        - my_certs is defined
+        - my_certs.certificates is defined
+        - (item.valid_to_iso8601 | to_datetime(format='%Y-%m-%dT%H:%M:%SZ')).timestamp() <= (now().timestamp() + 1209600) # Two weeks in seconds.
+        - (item.valid_to_iso8601 | to_datetime(format='%Y-%m-%dT%H:%M:%SZ')).timestamp() > now().timestamp()
+      loop_control:
+        label: "{{ item.issued_to }} - {{ item.valid_to_iso8601 }} - {{ item.thumbprint }}"
+
+    # Task to display a list of expired certificates.
+    - name: Display List of Expired Certificates
+      ansible.builtin.debug:
+        msg: "Certificate issued to '{{ item.issued_to }}' has expired."
+      loop: "{{ certificates_expired }}"
+      # Only run this task if there are any expired certificates to display.
+      when: certificates_expired is defined and certificates_expired | length > 0
+
+    # Task to display a list of certificates that are nearing expiration.
+    - name: Display Certificates Nearing Expiration
+      ansible.builtin.debug:
+        msg: "Certificate issued to '{{ item.issued_to }}' will expire in {{ item['days_left'] }} days."
+      loop: "{{ certificates_toexpire }}"
+      # Only run this task if there are any certificates nearing expiration to display.
+      when: certificates_toexpire is defined and certificates_toexpire | length > 0
