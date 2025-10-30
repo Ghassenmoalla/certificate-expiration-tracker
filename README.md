@@ -10,7 +10,6 @@ Developed an Ansible playbook to monitor SSL certificate expiry across Windows s
 ## Tech Stack  
 - Ansible (YAML)  
 - Windows target hosts (WinRM / PSRP)  
-- `ansible.windows.win_certificate_info` module :contentReference[oaicite:0]{index=0}  
 - Jinja2 filters & timestamp calculations  
 - (Optional) JSON export for further processing
 
